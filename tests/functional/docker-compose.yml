@@ -1,0 +1,65 @@
+version: '3.9'
+services:
+
+  redis:
+    image: redis:latest
+    ports:
+      - 6379:6379
+
+  metadata-service:
+    image: "ghcr.io/bsc-dom/dataclay:dev"
+    build:
+      context: ../../
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - redis
+    ports:
+      - 16587:16587
+    environment:
+      - DATACLAY_KV_HOST=redis
+      - DATACLAY_KV_PORT=6379
+      - DATACLAY_METADATA_PORT=16587
+      - DATACLAY_LOGLEVEL=DEBUG
+      - COVERAGE_FILE=/app/.coverage.metadata
+    command: coverage run --append -m dataclay.metadata
+    volumes:
+      - ../../:/app
+
+  backend_1:
+    image: "ghcr.io/bsc-dom/dataclay:dev"
+    depends_on:
+      - redis
+    environment:
+      - DATACLAY_KV_HOST=redis
+      - DATACLAY_KV_PORT=6379
+      - DATACLAY_LOGLEVEL=DEBUG
+      - COVERAGE_FILE=/app/.coverage.backend1
+    command: coverage run --append -m dataclay.backend
+    volumes:
+      - ../../:/app
+
+  backend_2:
+    image: "ghcr.io/bsc-dom/dataclay:dev"
+    depends_on:
+      - redis
+    environment:
+      - DATACLAY_KV_HOST=redis
+      - DATACLAY_KV_PORT=6379
+      - DATACLAY_LOGLEVEL=DEBUG
+      - COVERAGE_FILE=/app/.coverage.backend2
+    command: coverage run --append -m dataclay.backend
+    volumes:
+      - ../../:/app
+
+  backend_3:
+    image: "ghcr.io/bsc-dom/dataclay:dev"
+    depends_on:
+      - redis
+    environment:
+      - DATACLAY_KV_HOST=redis
+      - DATACLAY_KV_PORT=6379
+      - DATACLAY_LOGLEVEL=DEBUG
+      - COVERAGE_FILE=/app/.coverage.backend3
+    command: coverage run --append -m dataclay.backend
+    volumes:
+      - ../../:/app

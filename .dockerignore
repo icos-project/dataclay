@@ -1,0 +1,14 @@
+# In .dockerignore
+# Exclude everything:
+#
+*
+
+# Now un-exclude:
+#
+!src
+!pyproject.toml
+!README.md
+!MANIFEST.in
+!tests
+!tox.ini
+.dockerignore
