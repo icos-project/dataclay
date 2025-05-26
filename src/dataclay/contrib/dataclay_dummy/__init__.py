@@ -1,5 +1,3 @@
-""" Class description goes here. """
-
 """Deactivate dataClay to allow sequential un-modified execution.
 
 This will allow some loaded-modules-mangling and make dataClay classes
@@ -10,14 +8,14 @@ __author__ = "Alex Barcelo <alex.barcelo@bsc.es>"
 __copyright__ = "2017 Barcelona Supercomputing Center (BSC-CNS)"
 
 
-class StorageObject(object):
+class DataClayObject(object):
     def make_persistent(self, *args, **kwargs):
         """This becomes a no-op."""
         pass
 
 
-def dclayMethod(*args, **kwargs):
-    return lambda f: f
+def activemethod(f):
+    return f
 
 
 def deactivate_storage_library():
@@ -30,9 +28,9 @@ def deactivate_storage_library():
     import storage.api
 
     # Deactivate those things
-    dataclay.DataClayObject = StorageObject
-    dataclay.StorageObject = StorageObject
-    dataclay.dclayMethod = dclayMethod
+    dataclay.DataClayObject = DataClayObject
+    dataclay.StorageObject = DataClayObject
+    dataclay.activemethod = activemethod
 
     # Also in the storage.api
-    storage.api.StorageObject = StorageObject
+    storage.api.StorageObject = DataClayObject

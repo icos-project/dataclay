@@ -5,6 +5,13 @@ import pytest
 from dataclay import AlienDataClayObject, DataClayObject
 from dataclay.contrib.modeltest.alien import Dog, Person
 
+from pydantic import __version__ as pydantic_version
+
+if pydantic_version[0] == "1":
+    LEGACY_DEPS = True
+else:
+    LEGACY_DEPS = False
+
 
 def test_alien_builtin(client):
     """Test a simple make_persistent on a builtin type"""
@@ -15,7 +22,7 @@ def test_alien_builtin(client):
 
     l.make_persistent()
 
-    assert l._dc_is_registered == True
+    assert l._dc_is_registered is True
     assert len(l) == 3
     assert l.__len__() == 3
 
@@ -42,22 +49,28 @@ def test_alien_python_class(client):
     assert persistent_now == now
     assert now == persistent_now
 
-    assert persistent_now._dc_is_registered == True
+    assert persistent_now._dc_is_registered is True
 
 
 def test_alien_pydantic_model(client):
     p = AlienDataClayObject(Person(name="Alice", age=30))
     p.make_persistent()
 
-    assert p._dc_is_registered == True
+    assert p._dc_is_registered is True
 
     assert p.name == "Alice"
     assert p.age == 30
 
-    assert p.model_dump() == {"name": "Alice", "age": 30}
+    if LEGACY_DEPS:
+        assert p.dict() == {"name": "Alice", "age": 30}
+    else:
+        assert p.model_dump() == {"name": "Alice", "age": 30}
 
     same_person_json = {"name": "Alice", "age": 30}
-    same_person = AlienDataClayObject(Person.model_validate(same_person_json))
+    try:
+        same_person = AlienDataClayObject(Person.model_validate(same_person_json))
+    except AttributeError:  # could be LEGACY_DEPS comparison, but for a test, this is enough
+        same_person = AlienDataClayObject(Person.parse_obj(same_person_json))
     same_person.make_persistent()
 
     assert same_person.name == p.name
@@ -68,6 +81,20 @@ def test_alien_pydantic_model(client):
 
     assert same_person.name != p.name
     assert same_person.age != p.age
+
+
+def test_alien_pydantic_methods(client):
+    reference = Person(name="Alice", age=30)
+
+    p = AlienDataClayObject(Person(name="Alice", age=30))
+    p.make_persistent()
+
+    if LEGACY_DEPS:
+        assert p.dict() == reference.dict()
+        assert p.json() == reference.json()
+    else:
+        assert p.model_dump() == reference.model_dump()
+        assert p.model_dump_json() == reference.model_dump_json()
 
 
 def test_alien_getsetdelitem(client):

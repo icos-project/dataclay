@@ -7,5 +7,7 @@ API Reference
    dataclay.client
    dataclay.backend
    dataclay.metadata
+   dataclay.exceptions
    aliendco
+   stubdco
    annotations

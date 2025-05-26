@@ -1,20 +1,20 @@
-version: '3.9'
 services:
 
   redis:
     image: redis:latest
-    ports:
-      - 6379:6379
 
   metadata-service:
     image: "ghcr.io/bsc-dom/dataclay:dev"
+    # NOTE: Comment the *build* section for faster testing. It will use the image from the registry.
+    # Rebuilding is necessary when changing the project dependencies.
+    # WARNING: Don't commit the commented *build* section. It will break the GitHub Actions CI/CD pipeline.
     build:
       context: ../../
       dockerfile: Dockerfile.dev
     depends_on:
       - redis
     ports:
-      - 16587:16587
+      - 16587
     environment:
       - DATACLAY_KV_HOST=redis
       - DATACLAY_KV_PORT=6379
@@ -62,4 +62,21 @@ services:
       - COVERAGE_FILE=/app/.coverage.backend3
     command: coverage run --append -m dataclay.backend
     volumes:
+      - ../../:/app
+
+  proxy:
+    image: "ghcr.io/bsc-dom/dataclay:dev"
+    ports:
+      - 8676
+    depends_on:
+      - metadata-service
+      - backend_1
+    environment:
+      - DATACLAY_PROXY_MDS_HOST=metadata-service
+      - DATACLAY_KV_HOST=redis
+      - DATACLAY_LOGLEVEL=DEBUG
+    command: python -m dataclay.proxy
+    volumes:
+      - ./proxy_conf/proxy_config.py:/workdir/proxy_config.py
+      - ./proxy_conf/middleware.py:/workdir/middleware.py
       - ../../:/app

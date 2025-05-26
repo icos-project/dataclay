@@ -1,5 +1,7 @@
 import pytest
 
+from dataclay import DataClayObject
+from dataclay.exceptions import DataClayException
 from dataclay.contrib.modeltest.family import Dog, Family, Person
 from dataclay.contrib.modeltest.remote import MakePersistentTestClass
 
@@ -7,10 +9,10 @@ from dataclay.contrib.modeltest.remote import MakePersistentTestClass
 def test_make_persistent_basic(client):
     """Test a simple make_persistent call"""
     person = Person("Marc", 24)
-    assert person._dc_is_registered == False
+    assert person._dc_is_registered is False
 
     person.make_persistent()
-    assert person._dc_is_registered == True
+    assert person._dc_is_registered is True
     assert person.name == "Marc"
     assert person.age == 24
 
@@ -22,10 +24,10 @@ def test_make_persistent_basic(client):
 async def test_make_persistent_async(client):
     """Test a simple make_persistent call"""
     person = Person("Marc", 24)
-    assert person._dc_is_registered == False
+    assert person._dc_is_registered is False
 
     await person.a_make_persistent()
-    assert person._dc_is_registered == True
+    assert person._dc_is_registered is True
     assert person.name == "Marc"
     assert person.age == 24
 
@@ -35,10 +37,10 @@ async def test_make_persistent_async(client):
 
 def test_make_persistent_alias(client):
     person = Person("Marc", 24)
-    assert person._dc_is_registered == False
+    assert person._dc_is_registered is False
 
     person.make_persistent(alias="test_make_persistent_alias")
-    assert person._dc_is_registered == True
+    assert person._dc_is_registered is True
 
     persistent_person = person.get_by_alias("test_make_persistent_alias")
     assert persistent_person.name == person.name
@@ -51,10 +53,10 @@ def test_make_persistent_alias(client):
 @pytest.mark.asyncio
 async def test_make_persistent_alias_async(client):
     person = Person("Marc", 24)
-    assert person._dc_is_registered == False
+    assert person._dc_is_registered is False
 
     await person.a_make_persistent(alias="test_make_persistent_alias_async")
-    assert person._dc_is_registered == True
+    assert person._dc_is_registered is True
 
     persistent_person = await person.a_get_by_alias("test_make_persistent_alias_async")
     assert persistent_person.name == person.name
@@ -74,13 +76,13 @@ def test_make_persistent_recursive(client):
     dog = Dog("Rio", 5)
     family.add(person)
     person.dog = dog
-    assert person._dc_is_registered == False
-    assert dog._dc_is_registered == False
+    assert person._dc_is_registered is False
+    assert dog._dc_is_registered is False
 
     family.make_persistent()
-    assert person._dc_is_registered == True
+    assert person._dc_is_registered is True
     assert person == family.members[0]
-    assert dog._dc_is_registered == True
+    assert dog._dc_is_registered is True
     assert dog == person.dog
 
 
@@ -95,13 +97,13 @@ async def test_make_persistent_recursive_async(client):
     dog = Dog("Rio", 5)
     family.add(person)
     person.dog = dog
-    assert person._dc_is_registered == False
-    assert dog._dc_is_registered == False
+    assert person._dc_is_registered is False
+    assert dog._dc_is_registered is False
 
     await family.a_make_persistent()
-    assert person._dc_is_registered == True
+    assert person._dc_is_registered is True
     assert person == family.members[0]
-    assert dog._dc_is_registered == True
+    assert dog._dc_is_registered is True
     assert dog == person.dog
 
 
@@ -116,8 +118,8 @@ def test_make_persistent_cycle(client):
     person_2.spouse = person_1
     person_1.make_persistent()
 
-    assert person_1._dc_is_registered == True
-    assert person_2._dc_is_registered == True
+    assert person_1._dc_is_registered is True
+    assert person_2._dc_is_registered is True
     assert person_1 == person_2.spouse
     assert person_2 == person_1.spouse
 
@@ -134,8 +136,8 @@ async def test_make_persistent_cycle_async(client):
     person_2.spouse = person_1
     await person_1.a_make_persistent()
 
-    assert person_1._dc_is_registered == True
-    assert person_2._dc_is_registered == True
+    assert person_1._dc_is_registered is True
+    assert person_2._dc_is_registered is True
     assert person_1 == person_2.spouse
     assert person_2 == person_1.spouse
 
@@ -219,10 +221,10 @@ def test_persistent_references(client):
     person = Person("Marc", 24)
     person.make_persistent()
     family = Family(person)
-    assert family._dc_is_registered == False
+    assert family._dc_is_registered is False
 
     family.make_persistent()
-    assert family._dc_is_registered == True
+    assert family._dc_is_registered is True
     assert person == family.members[0]
 
 
@@ -234,11 +236,20 @@ async def test_persistent_references_async(client):
     person = Person("Marc", 24)
     await person.a_make_persistent()
     family = Family(person)
-    assert family._dc_is_registered == False
+    assert family._dc_is_registered is False
 
     await family.a_make_persistent()
-    assert family._dc_is_registered == True
+    assert family._dc_is_registered is True
     assert person == family.members[0]
+
+
+def test_persistent_error_unknown_module(client):
+    class InvalidClass(DataClayObject):
+        pass
+
+    a = InvalidClass()
+    with pytest.raises(DataClayException):
+        a.make_persistent()
 
 
 # Remote methods

@@ -1,11 +1,21 @@
 # In .dockerignore
-# Exclude everything:
+
+# Exclude everything
+
 #
+
 *
 
-# Now un-exclude:
+# Now un-exclude
+
 #
+
 !src
+!compile_protos.py
+!dynamic_dependencies.py
+!dataclay-common
+!requirements.txt
+!requirements-legacydeps.txt
 !pyproject.toml
 !README.md
 !MANIFEST.in

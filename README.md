@@ -52,9 +52,6 @@ We welcome contributions to dataClay. Please see the [Contributing](https://data
 
 [BSC official website](https://www.bsc.es/dataclay)
 
-# Legal
-The dataClay software package is released under the BSC 3-Clause license.
-Copyright © 2022-2024 BSC. All rights reserved.
+## Acknolwedgments
 
-🇪🇺 This work has received funding from the European Union's HORIZON research and innovation programme under grant agreement No. 101070177.
-
+See the [full list of acknowledgments](ACKNOWLEDGMENTS.md)

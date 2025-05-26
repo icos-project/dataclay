@@ -18,9 +18,14 @@ from collections import ChainMap
 from typing import TYPE_CHECKING, Annotated, Any, Optional, Type, TypeVar, get_origin
 
 from dataclay.annotated import LocalOnly, PropertyTransformer
-from dataclay.config import get_runtime
-from dataclay.event_loop import get_dc_event_loop, run_dc_coroutine
-from dataclay.exceptions import ObjectIsMasterError, ObjectNotRegisteredError
+from dataclay.config import LEGACY_DEPS, get_runtime
+from dataclay.event_loop import get_dc_event_loop
+from dataclay.exceptions import (
+    AliasDoesNotExistError,
+    DoesNotExistError,
+    ObjectIsMasterError,
+    ObjectNotRegisteredError,
+)
 from dataclay.metadata.kvdata import ObjectMetadata
 from dataclay.utils.telemetry import trace
 
@@ -49,6 +54,28 @@ def activemethod(func):
     """Decorator for DataClayObject active methods."""
 
     @functools.wraps(func)
+    async def awrapper(self: DataClayObject, *args, **kwargs):
+        try:
+            if self._dc_is_local:
+                logger.debug(
+                    "(%s) Calling async activemethod '%s' locally", self._dc_meta.id, func.__name__
+                )
+                return await func(self, *args, **kwargs)
+            else:
+                logger.debug(
+                    "(%s) Calling async activemethod '%s' remotely", self._dc_meta.id, func.__name__
+                )
+
+                future = asyncio.run_coroutine_threadsafe(
+                    get_runtime().call_remote_method(self, func.__name__, args, kwargs),
+                    get_dc_event_loop(),
+                )
+                return await asyncio.wrap_future(future)
+        except Exception:
+            logger.debug("Error calling activemethod '%s'", func.__name__, exc_info=True)
+            raise
+
+    @functools.wraps(func)
     def wrapper(self: DataClayObject, *args, **kwargs):
         try:
             # Example to make __init__ active:
@@ -63,28 +90,27 @@ def activemethod(func):
                 # NOTE: Decided to remove reader lock. It is too complex and not necessary, since
                 # the method can be executed even if the object is not loaded. The object will be
                 # loaded again when accessing the properties.
-                # BUG: If the object has non-dc_properties, thise could be problematic, if the
+                # BUG: If the object has non-dc_properties, could be problematic, if the
                 # object is unloaded while executing the method.
                 return func(self, *args, **kwargs)
             else:
                 logger.debug(
                     "(%s) Calling activemethod '%s' remotely", self._dc_meta.id, func.__name__
                 )
-
-                if inspect.iscoroutinefunction(func):
-                    # TODO: I think this gives problems, in test_remote_method.test_remote_make_persistent()
-                    return get_runtime().call_remote_method(self, func.__name__, args, kwargs)
-                else:
-                    return asyncio.run_coroutine_threadsafe(
-                        get_runtime().call_remote_method(self, func.__name__, args, kwargs),
-                        get_dc_event_loop(),
-                    ).result()
+                return asyncio.run_coroutine_threadsafe(
+                    get_runtime().call_remote_method(self, func.__name__, args, kwargs),
+                    get_dc_event_loop(),
+                ).result()
         except Exception:
             logger.debug("Error calling activemethod '%s'", func.__name__, exc_info=True)
             raise
 
-    # wrapper.is_activemethod = True
-    return wrapper
+    if inspect.iscoroutinefunction(func):
+        awrapper._is_activemethod = True
+        return awrapper
+    else:
+        wrapper._is_activemethod = True
+        return wrapper
 
 
 class DataClayProperty:
@@ -117,7 +143,7 @@ class DataClayProperty:
         )
 
         if instance._dc_is_local:
-            logger.debug("local get")
+            logger.debug("(%s) Calling local __getattribute__", instance._dc_meta.id)
             # If the object is local and loaded, we can access the attribute directly
             if not instance._dc_is_loaded:
                 # NOTE: Should be called from another thread.
@@ -138,7 +164,8 @@ class DataClayProperty:
             else:
                 return self.transformer.getter(attr)
         else:
-            logger.debug("remote get")
+            logger.debug("(%s) Calling remote __getattribute__", instance._dc_meta.id)
+            assert get_dc_event_loop()._thread_id != threading.get_ident()
             return asyncio.run_coroutine_threadsafe(
                 get_runtime().call_remote_method(instance, "__getattribute__", (self.name,), {}),
                 get_dc_event_loop(),
@@ -150,15 +177,14 @@ class DataClayProperty:
         See the __get__ method for the basic behavioural explanation.
         """
         logger.debug(
-            "(%s) Setting dc_property '%s.%s=%s'",
+            "(%s) Setting dc_property '%s.%s'",
             instance._dc_meta.id,
             instance.__class__.__name__,
             self.name,
-            value,
         )
 
         if instance._dc_is_local:
-            logger.debug("local set")
+            logger.debug("(%s) Calling local __setattr__", instance._dc_meta.id)
             if not instance._dc_is_loaded:
                 assert get_dc_event_loop()._thread_id != threading.get_ident()
                 asyncio.run_coroutine_threadsafe(
@@ -168,7 +194,8 @@ class DataClayProperty:
                 value = self.transformer.setter(value)
             setattr(instance, self.dc_property_name, value)
         else:
-            logger.debug("remote set")
+            logger.debug("(%s) Calling remote __setattr__", instance._dc_meta.id)
+            assert get_dc_event_loop()._thread_id != threading.get_ident()
             return asyncio.run_coroutine_threadsafe(
                 get_runtime().call_remote_method(instance, "__setattr__", (self.name, value), {}),
                 get_dc_event_loop(),
@@ -184,7 +211,7 @@ class DataClayProperty:
         )
 
         if instance._dc_is_local:
-            logger.debug("local delete")
+            logger.debug("(%s) Calling local __delattr__", instance._dc_meta.id)
             if not instance._dc_is_loaded:
                 assert get_dc_event_loop()._thread_id != threading.get_ident()
                 asyncio.run_coroutine_threadsafe(
@@ -193,7 +220,8 @@ class DataClayProperty:
 
             delattr(instance, self.dc_property_name)
         else:
-            logger.debug("remote delete")
+            logger.debug("(%s) Calling remote __delattr__", instance._dc_meta.id)
+            assert get_dc_event_loop()._thread_id != threading.get_ident()
             return asyncio.run_coroutine_threadsafe(
                 get_runtime().call_remote_method(instance, "__delattr__", (self.name,), {}),
                 get_dc_event_loop(),
@@ -245,25 +273,26 @@ class DataClayObject:
         obj._dc_meta = ObjectMetadata(class_name=cls.__module__ + "." + cls.__name__)
 
         logger.debug(
-            "(%s) Creating new dc_object '%s' args=%s, kwargs=%s",
+            "(%s) Creating new DataClayObject '%s' with args=%s, kwargs=%s",
             obj._dc_meta.id,
             cls.__name__,
             args,
             kwargs,
         )
 
-        # If the object is being created in a backend, it should be made persistent immediately
-        # This should only happen when instantiating a dataClay object from an activemethod,
-        # The activemethod must had been called in another thread using an executor. Therefore,
-        # there is not running event loop in the current thread, and we can use run_coroutine_threadsafe
-        # to the main dc_running_loop.
-        # TODO: This same logic applies to all DataClayObject methods that are called withing an activemethod.
+        # If the object is created on a backend, it should be made persistent immediately.
+        # This happens when a DataClay object is instantiated from an activemethod.
+        # Since activemethods are executed in another thread (using an executor),
+        # there is no active event loop in the current thread. Therefore, we can safely use
+        # run_coroutine_threadsafe to interact with the main event loop (dc_running_loop).
+        # TODO: Apply this logic to all DataClayObject methods invoked within activemethods.
         if get_runtime() and get_runtime().is_backend:
             logger.debug("(%s) Calling implicit make_persistent", obj._dc_meta.id)
 
-            # TODO: Option to make an eventual call to make_persistent async
-            # loop.create_task(obj.a_make_persistent())
+            # TODO: Consider making make_persistent an asynchronous call
+            # Example: loop.create_task(obj.a_make_persistent())
             obj.make_persistent()
+            # Alternatively, use the event loop for async behavior:
             # loop = get_dc_event_loop()
             # t = asyncio.run_coroutine_threadsafe(obj.make_persistent(), loop)
             # t.result()
@@ -337,7 +366,10 @@ class DataClayObject:
         If the object is NOT persistent, then this method returns None.
         """
         if self._dc_is_registered:
-            return self._dc_meta.model_dump_json()
+            if LEGACY_DEPS:
+                return self._dc_meta.json()
+            else:
+                return self._dc_meta.model_dump_json()
         else:
             return None
 
@@ -437,16 +469,21 @@ class DataClayObject:
         # WARNING: This method must not be called from the same thread as the running event loop
         # or it will block the event loop. When unserializing dataClay objects, use "await dcloads"
         # if possible. Only use "pickle.loads" if you are sure that the event loop is not running.
-        # "pickle.loads" of dataClay objects is calling this method behind. With `dcloads` this method
-        # will be called in another thread, so it will not block the event loop.
+        # "pickle.loads" of dataClay objects is calling this method behind. With `dcloads` this
+        # method will be called in another thread, so it will not block the event loop.
 
+        logger.debug("(%s) Calling get_by_id", object_id)
+        assert get_dc_event_loop()._thread_id != threading.get_ident()
         future = asyncio.run_coroutine_threadsafe(cls._get_by_id(object_id), get_dc_event_loop())
         return future.result()
 
     @classmethod
     @tracer.start_as_current_span("get_by_alias")
     async def _get_by_alias(cls: Type[T], alias: str, dataset_name: str = None) -> T:
-        return await get_runtime().get_object_by_alias(alias, dataset_name)
+        try:
+            return await get_runtime().get_object_by_alias(alias, dataset_name)
+        except DoesNotExistError as e:
+            raise AliasDoesNotExistError(alias, dataset_name) from e
 
     @classmethod
     async def a_get_by_alias(cls: Type[T], alias: str, dataset_name: str = None) -> T:
@@ -458,18 +495,20 @@ class DataClayObject:
 
     @classmethod
     def get_by_alias(cls: Type[T], alias: str, dataset_name: str = None) -> T:
-        """Returns the object with the given alias.
+        """
+        Retrieve an object by its alias.
 
         Args:
-            alias: Alias of the object.
-            dataset_name: Name of the dataset where the alias is stored. If None, the active dataset is used.
+            alias: The alias of the object to retrieve.
+            dataset_name: Optional. The name of the dataset where the alias is stored.
+                          If not provided, the active dataset is used.
 
         Returns:
-            The object with the given alias.
+            The object associated with the given alias.
 
         Raises:
-            DoesNotExistError: If the alias does not exist.
-            DatasetIsNotAccessibleError: If the dataset is not accessible.
+            DoesNotExistError: If no object with the given alias exists.
+            DatasetIsNotAccessibleError: If the specified dataset is not accessible.
         """
         future = asyncio.run_coroutine_threadsafe(
             cls._get_by_alias(alias, dataset_name), get_dc_event_loop()
@@ -536,7 +575,8 @@ class DataClayObject:
 
         Args:
             alias: Alias to be removed.
-            dataset_name: Name of the dataset where the alias is stored. If None, the active dataset is used.
+            dataset_name: Name of the dataset where the alias is stored.
+                          If None, the active dataset is used.
 
         Raises:
             DoesNotExistError: If the alias does not exist.
@@ -726,22 +766,23 @@ class DataClayObject:
 
     @tracer.start_as_current_span("dc_update")
     async def dc_update(self, from_object: DataClayObject):
-        """Updates current object with contents of from_object.
+        """Updates the current object with the properties of from_object.
 
         Args:
-            from_object: object with the new values to update current object.
+            from_object: The object with the new values to update current object.
 
         Raises:
             TypeError: If the objects are not of the same type.
         """
-        if type(self) != type(from_object):
+        if not isinstance(from_object, type(self)):
             raise TypeError("Objects must be of the same type")
 
         await get_runtime().replace_object_properties(self, from_object)
 
     @tracer.start_as_current_span("dc_update_properties")
     async def _dc_update_properties(self, new_properties: dict[str, Any]):
-        # TODO: Check that the new properties are the same and of the same type as the current object
+        # TODO: Check that the new properties are the same and
+        # of the same type as the current object
         await get_runtime().update_object_properties(self, new_properties)
 
     async def a_dc_update_properties(self, new_properties: dict[str, Any]):
@@ -779,45 +820,18 @@ class DataClayObject:
             AttributeError: if alias is null or empty.
             AlreadyExistError: If the alias already exists.
             KeyError: If the backend_id is not registered in dataClay.
-            ObjectAlreadyRegisteredError: If the object is already registered in dataClay.
         """
         if not alias:
             raise AttributeError("Alias cannot be null or empty")
         await self.a_make_persistent(alias=alias, backend_id=backend_id)
 
-    ##############
-    # Federation #
-    ##############
-
-    def federate_to_backend(self, ext_execution_env_id, recursive=True):
-        get_runtime().federate_to_backend(self, ext_execution_env_id, recursive)
-
-    def federate(self, ext_dataclay_id, recursive=True):
-        get_runtime().federate_object(self, ext_dataclay_id, recursive)
-
-    def unfederate_from_backend(self, ext_execution_env_id, recursive=True):
-        get_runtime().unfederate_from_backend(self, ext_execution_env_id, recursive)
-
-    def unfederate(self, ext_dataclay_id=None, recursive=True):
-        # FIXME: unfederate only from specific ext dataClay
-        get_runtime().unfederate_object(self, ext_dataclay_id, recursive)
-
-    def synchronize(self, field_name, value):
-        # from dataclay.DataClayObjProperties import DCLAY_SETTER_PREFIX
-        raise Exception("Synchronize need refactor")
-        return get_runtime().synchronize(self, DCLAY_SETTER_PREFIX + field_name, value)
+    #################
+    # Magic Methods #
+    #################
 
     def __repr__(self):
-        if self._dc_is_registered:
-            return "<%s instance with ObjectID=%s>" % (
-                self._dc_meta.class_name,
-                self._dc_meta.id,
-            )
-        else:
-            return "<%s volatile instance with ObjectID=%s>" % (
-                self._dc_meta.class_name,
-                self._dc_meta.id,
-            )
+        status = "instance" if self._dc_is_registered else "volatile instance"
+        return f"<{self._dc_meta.class_name} {status} with ObjectID={self._dc_meta.id}>"
 
     def __eq__(self, other):
         if not isinstance(other, DataClayObject):
@@ -831,16 +845,6 @@ class DataClayObject:
     # FIXME: Think another solution, the user may want to override the method
     def __hash__(self):
         return hash(self._dc_meta.id)
-
-    @activemethod
-    def __setUpdate__(
-        self, obj: "Any", property_name: str, value: "Any", beforeUpdate: str, afterUpdate: str
-    ):
-        if beforeUpdate is not None:
-            getattr(self, beforeUpdate)(property_name, value)
-        object.__setattr__(obj, "%s%s" % ("_dataclay_property_", property_name), value)
-        if afterUpdate is not None:
-            getattr(self, afterUpdate)(property_name, value)
 
     def __copy__(self):
         # NOTE: A shallow copy cannot be performed, or has no sense.

@@ -1,15 +1,16 @@
-# syntax=docker/dockerfile:1
-
-ARG PYTHON_VERSION=3.10-bullseye
-
-# install dataclay
+ARG PYTHON_VERSION=3.10-bookworm
 FROM python:$PYTHON_VERSION
-COPY . /app
-RUN python -m pip install --upgrade pip \
-  && python -m pip install -e /app[telemetry,dev]
 
-# prepare dataclay storage dir
+COPY . /app
+
+RUN python -m pip install --upgrade pip \
+&& python -m pip install -e /app[telemetry,dev]
+
+ARG EXTRA_DEPS=""
+RUN if [ -n "$EXTRA_DEPS" ]; then \
+    python -m pip install $EXTRA_DEPS; \
+  fi
+
 RUN mkdir -p /data/storage; 
 
-# set workdir and entrypoint
 WORKDIR /workdir

@@ -1,5 +1,6 @@
 """Entry point for the Proxy server."""
 
+import asyncio
 import importlib
 import logging
 
@@ -70,4 +71,4 @@ else:
     except AttributeError:
         pass
 
-servicer.serve(md_api, interceptors, middleware_metadata, middleware_backend)
+asyncio.run(servicer.serve(md_api, interceptors, middleware_metadata, middleware_backend))

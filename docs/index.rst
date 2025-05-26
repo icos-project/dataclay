@@ -9,8 +9,9 @@ dataClay
    user-guide
    main-concepts
    alien-objects
+   stub-objects
    advanced-usage
-   telemetry
+   logging
    examples/index
 
 .. toctree::
@@ -26,10 +27,20 @@ dataClay
 
 .. toctree::
    :hidden:
+   :caption: Telemetry
+
+   telemetry/configuration
+   telemetry/offline
+   telemetry/real-time
+   telemetry/prometheus
+   telemetry/hpc-tracing
+
+.. toctree::
+   :hidden:
    :caption: Release Notes
 
-   releasenotes/3-x
    releasenotes/4-x
+   releasenotes/3-x
 
 .. toctree::
    :hidden:
@@ -64,9 +75,14 @@ Alternatively, you can obtain the latest source code from `GitHub <https://githu
 
 .. code-block:: console
 
-   $ git clone https://github.com/bsc-dom/dataclay.git
+   $ git clone --recurse-submodules https://github.com/bsc-dom/dataclay.git
    $ cd dataclay
    $ pip install .
+
+
+.. note::
+   It is necessary to use the ``--recurse-submodules`` option to clone the repository, as it contains
+   submodules that are required for the installation.
 
 Usage
 -----

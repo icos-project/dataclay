@@ -1,8 +1,15 @@
 import logging
+import asyncio
 from typing import Callable, Optional, Union
 from uuid import UUID
 
-from dataclay.exceptions import AccountError, AccountInvalidCredentialsError
+from dataclay.exceptions import (
+    AccountError,
+    AccountInvalidCredentialsError,
+    AliasAlreadyExistError,
+    AliasDoesNotExistError,
+    AlreadyExistError,
+)
 from dataclay.metadata.kvdata import (
     Account,
     Alias,
@@ -13,6 +20,7 @@ from dataclay.metadata.kvdata import (
 )
 from dataclay.metadata.redismanager import RedisManager
 from dataclay.utils.telemetry import trace
+from dataclay.event_loop import get_dc_event_loop
 
 FEDERATOR_ACCOUNT_USERNAME = "Federator"
 EXTERNAL_OBJECTS_DATASET_NAME = "ExternalObjects"
@@ -30,8 +38,15 @@ class MetadataAPI:
     async def close(self):
         await self.kv_manager.close()
 
-    async def is_ready(self, timeout: Optional[float] = None, pause: float = 0.5):
+    async def _is_ready(self, timeout, pause):
         return await self.kv_manager.is_ready(timeout=timeout, pause=pause)
+    
+    async def is_ready(self, timeout: Optional[float] = None, pause: float = 0.5):
+        future = asyncio.run_coroutine_threadsafe(
+            self._is_ready(timeout, pause), get_dc_event_loop()
+        )
+        return await asyncio.wrap_future(future)
+
 
     ###########
     # Account #
@@ -93,22 +108,21 @@ class MetadataAPI:
             Exception('Account is not valid!'): If wrong credentials
         """
         logger.debug("Creating new dataset with name=%s, owner=%s", dataset_name, username)
-        # Lock to update account.datasets without race condition
-        with await self.kv_manager.lock(Account.path + username):
-            # Validates account credentials
-            account = await self.kv_manager.get_kv(Account, username)
-            if not account.verify(password):
-                raise AccountInvalidCredentialsError(username)
 
-            # Creates new dataset and updates account's list of datasets
-            dataset = Dataset(name=dataset_name, owner=username)
-            account.datasets.append(dataset_name)
+        # Validates account credentials
+        account = await self.kv_manager.get_kv(Account, username)
+        if not account.verify(password):
+            raise AccountInvalidCredentialsError(username)
 
-            # Put new dataset to kv and updates account metadata
-            # Order matters to check that dataset name is not registered
-            await self.kv_manager.set_new(dataset)
-            await self.kv_manager.update(account)
-            logger.info("New dataset with name=%s, owner=%s", dataset_name, username)
+        # Creates new dataset and updates account's list of datasets
+        dataset = Dataset(name=dataset_name, owner=username)
+        account.datasets.append(dataset_name)
+
+        # Put new dataset to kv and updates account metadata
+        # Order matters to check that dataset name is not registered
+        await self.kv_manager.set_new(dataset)
+        await self.kv_manager.update(account)
+        logger.info("New dataset with name=%s, owner=%s", dataset_name, username)
 
     @tracer.start_as_current_span("add_account_to_dataset")
     async def add_account_to_dataset(
@@ -247,7 +261,10 @@ class MetadataAPI:
             "Creating new alias '%s.%s' for object %s", dataset_name, alias_name, object_id
         )
         alias = Alias(name=alias_name, dataset_name=dataset_name, object_id=object_id)
-        await self.kv_manager.set_new(alias)
+        try:
+            await self.kv_manager.set_new(alias)
+        except AlreadyExistError as e:
+            raise AliasAlreadyExistError(alias_name, dataset_name) from e
 
     @tracer.start_as_current_span("get_all_alias")
     async def get_all_alias(
